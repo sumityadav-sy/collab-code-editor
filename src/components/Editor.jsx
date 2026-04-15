@@ -5,32 +5,32 @@ import { java } from "@codemirror/lang-java";
 import { cpp } from "@codemirror/lang-cpp";
 import { vscodeLight } from '@uiw/codemirror-theme-vscode'
 import { useState } from 'react'
-
+//  import Liveblocks hooks
+import { useStorage, useMutation } from "../liveblocks.config";
 const languages = {
   javascript: javascript(),
   python: python(),
   java: java(),
   cpp: cpp(),
 }
-
 function Editor() {
-  const [code, setCode] = useState('// start coding here...')
+//  shared code (comes from Liveblocks storage)
+const code = useStorage((root) => root?.code) || ""
+//  function to update shared code
+  const updateCode = useMutation(({ storage }, newCode) => {
+    storage.set("code", newCode) // updates shared state → syncs everywhere
+  }, [])
+
+// keep this (local UI state)
   const [language, setLanguage] = useState('javascript')
-
-  return (
+return (
     <div className="flex h-screen bg-gray-900 text-white">
-
-      {/* Left sidebar */}
-      <div className="w-48 bg-gray-800 p-4 flex flex-col gap-2">
+<div className="w-48 bg-gray-800 p-4 flex flex-col gap-2">
         <p className="text-xs text-gray-400 uppercase tracking-wider">File</p>
         <p className="text-sm text-white">main.js</p>
       </div>
-
-      {/* Main editor area */}
-      <div className="flex flex-col flex-1">
-
-        {/* Top bar with language dropdown */}
-        <div className="bg-gray-800 px-4 py-2 flex items-center gap-3">
+<div className="flex flex-col flex-1">
+<div className="bg-gray-800 px-4 py-2 flex items-center gap-3">
           <span className="text-sm text-gray-400">Language:</span>
           <select
             value={language}
@@ -43,26 +43,20 @@ function Editor() {
             <option value="cpp">C++</option>
           </select>
         </div>
-
-        {/* The actual code editor */}
-        <div className="flex-1">
+<div className="flex-1">
           <CodeMirror
-            value={code}
+            value={code || ""} // fallback to prevent undefined crash
             height="100%"
             theme={vscodeLight}
             extensions={[languages[language]]}
-            onChange={(val) => setCode(val)}
+            onChange={(val) => updateCode(val)} // 🔥 sync on every change
           />
         </div>
       </div>
-
-      {/* Right panel (empty for now) */}
-      <div className="w-48 bg-gray-800 p-4">
+<div className="w-48 bg-gray-800 p-4">
         <p className="text-xs text-gray-400 uppercase tracking-wider">Panel</p>
       </div>
-
-    </div>
+</div>
   )
 }
-
 export default Editor
