@@ -5,19 +5,30 @@ import { createRoomContext } from "@liveblocks/react";
 const client = createClient({
   publicApiKey: "pk_dev_-8kPqrqlCUS88m1JMImMiXFi69UBE3FtNnwM4LQvcXxO71hJ1ac8G7RkJ6ozC5kg", // keep your key here
 });
-
-// create room context (this gives hooks)
+// This defines the TypeScript-like shape of our room data.
+// Even in JS projects, keeping this structure clear helps a lot.
 const {
   RoomProvider,
-  useStorage,
-  useMutation,
   useOthers,
-} = createRoomContext(client);
+  useMyPresence,
+  useMutation,
+  useStorage,
+} = createRoomContext(client, {
+  Presence: {
+    name: "",
+    color: "",
+    cursor: null,
+  },
+  Storage: {
+    code: "",
+    language: "javascript", // 🔹 FIX 1: shared language state
+  },
+});
 
-// export everything
 export {
   RoomProvider,
-  useStorage,
-  useMutation,
   useOthers,
+  useMyPresence,
+  useMutation,
+  useStorage,
 };
