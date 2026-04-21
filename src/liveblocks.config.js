@@ -22,6 +22,7 @@ const {
   Storage: {
     code: "",
     language: "javascript", // 🔹 FIX 1: shared language state
+    output: "", // ✅ NEW (shared output)
   },
 });
 

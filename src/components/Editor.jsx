@@ -1,5 +1,6 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
+import { useEffect } from "react";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
 import { java } from "@codemirror/lang-java";
@@ -14,6 +15,7 @@ import {
   useOthers,
 } from "../liveblocks.config";
 
+// Language extensions for CodeMirror
 const languageExtensions = {
   javascript: javascript(),
   python: python(),
@@ -23,7 +25,7 @@ const languageExtensions = {
 
 function Editor() {
   // =========================
-  // 🔹 Shared Code (Storage)
+  // 🔹 Shared Code (Liveblocks)
   // =========================
   const code = useStorage((root) => root.code);
 
@@ -32,8 +34,7 @@ function Editor() {
   }, []);
 
   // =========================
-  // 🔹 FIX 1 — Language in shared Storage (not local state)
-  // All users now see the same language when anyone switches
+  // 🔹 Shared Language
   // =========================
   const language = useStorage((root) => root.language);
 
@@ -42,12 +43,31 @@ function Editor() {
   }, []);
 
   // =========================
+  // 🔹 Shared Output (NEW)
+  // =========================
+  const output = useStorage((root) => root.output);
+
+  const updateOutput = useMutation(({ storage }, value) => {
+    storage.set("output", value);
+  }, []);
+
+  // =========================
+  // 🔹 Local UI State
+  // =========================
+  const [isRunning, setIsRunning] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
+  useEffect(() => {
+  if (output && output !== "Click ▶ Run to execute code") {
+    setShowOutput(true);
+  }
+}, [output]);
+
+  // =========================
   // 🔹 Presence (Live Cursors)
   // =========================
   const [myPresence, updateMyPresence] = useMyPresence();
   const others = useOthers();
 
-  // Ref for correct cursor positioning
   const editorRef = useRef(null);
 
   // =========================
@@ -70,25 +90,108 @@ function Editor() {
     updateMyPresence({ cursor: null });
   }, [updateMyPresence]);
 
-  // Fallback while storage loads
   const activeLanguage = language || "javascript";
+
+  // =========================
+  // 🚀 RUN CODE FUNCTION (PISTON API)
+  // =========================
+  const runCode = async () => {
+  setIsRunning(true);
+  setShowOutput(true);
+
+  updateOutput("Running...");
+
+  const languageIds = {
+    javascript: 63,
+    python: 71,
+    java: 62,
+    cpp: 54,
+  };
+
+  try {
+    // 🔥 STEP 1: Submit code
+    const submitRes = await fetch(
+      "https://judge029.p.rapidapi.com/submissions?base64_encoded=false&wait=false",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-RapidAPI-Key": import.meta.env.VITE_RAPIDAPI_KEY,
+          "X-RapidAPI-Host": import.meta.env.VITE_RAPIDAPI_HOST,
+        },
+        body: JSON.stringify({
+          source_code: code,
+          language_id: languageIds[activeLanguage],
+          stdin: "",
+        }),
+      }
+    );
+
+    // ✅ HANDLE API LIMIT HERE
+    if (submitRes.status === 429) {
+      updateOutput("API limit reached. Try again later.");
+      setIsRunning(false);
+      return;
+    }
+
+    const submitData = await submitRes.json();
+    const token = submitData.token;
+
+    // 🔥 STEP 2: Poll for result
+    let result = null;
+
+    while (true) {
+      const res = await fetch(
+        `https://judge029.p.rapidapi.com/submissions/${token}?base64_encoded=false`,
+        {
+          headers: {
+            "X-RapidAPI-Key": import.meta.env.VITE_RAPIDAPI_KEY,
+            "X-RapidAPI-Host": import.meta.env.VITE_RAPIDAPI_HOST,
+          },
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.status?.id <= 2) {
+        // still processing
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        result =
+          data.stdout ||
+          data.stderr ||
+          data.compile_output ||
+          "No output";
+        break;
+      }
+    }
+
+    // 🔥 IMPORTANT: force sync update
+    updateOutput(result + " ");
+
+  } catch (err) {
+    console.error(err);
+    updateOutput("Error running code");
+  }
+
+  setIsRunning(false);
+};
 
   return (
     <div className="flex h-screen bg-gray-900 text-white">
       {/* LEFT PANEL */}
-      <div className="w-48 bg-gray-800 p-4 flex flex-col gap-2">
-        <p className="text-xs text-gray-400 uppercase tracking-wider">File</p>
-        <p className="text-sm text-white">main.js</p>
+      <div className="w-48 bg-gray-800 p-4">
+        <p className="text-xs text-gray-400 uppercase">File</p>
+        <p className="text-sm">main.js</p>
       </div>
 
       {/* MAIN EDITOR */}
-      <div className="flex flex-col flex-1 relative">
+      <div className="flex flex-col flex-1">
 
-        {/* FIX 2 — TOP BAR now contains BOTH language selector AND user badges */}
-        {/* No more absolute-positioned badges floating over the editor */}
+        {/* TOP BAR */}
         <div className="bg-gray-800 px-4 py-2 flex items-center gap-3">
-          {/* Language selector */}
           <span className="text-sm text-gray-400">Language:</span>
+
           <select
             value={activeLanguage}
             onChange={(e) => updateLanguage(e.target.value)}
@@ -100,38 +203,38 @@ function Editor() {
             <option value="cpp">C++</option>
           </select>
 
-          {/* Spacer pushes badges to the right */}
+          {/* ▶ RUN BUTTON */}
+          <button
+            onClick={runCode}
+            className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm"
+          >
+            {isRunning ? "Running..." : "▶ Run"}
+          </button>
+
           <div className="flex-1" />
 
-          {/* Current user badge */}
+          {/* USER BADGES */}
           {myPresence?.name && (
             <div
               style={{
                 background: myPresence.color,
-                color: "white",
                 padding: "4px 10px",
                 borderRadius: "999px",
                 fontSize: "13px",
-                fontWeight: "500",
-                whiteSpace: "nowrap",
               }}
             >
               You • {myPresence.name}
             </div>
           )}
 
-          {/* Other user badges */}
           {others.map((user) => (
             <div
               key={user.connectionId}
               style={{
                 background: user.presence?.color,
-                color: "white",
                 padding: "4px 10px",
                 borderRadius: "999px",
                 fontSize: "13px",
-                fontWeight: "500",
-                whiteSpace: "nowrap",
               }}
             >
               {user.presence?.name || "Guest"}
@@ -139,79 +242,98 @@ function Editor() {
           ))}
         </div>
 
-        {/* CODEMIRROR WRAPPER */}
-        <div
-          ref={editorRef}
-          onPointerMove={handlePointerMove}
-          onPointerLeave={handlePointerLeave}
-          className="flex-1 relative"
-          style={{ height: "calc(100vh - 40px)" }}
-        >
-          {/* Code Editor */}
-          <CodeMirror
-            value={code || ""}
-            height="100%"
-            theme={vscodeLight}
-            extensions={[languageExtensions[activeLanguage]]}
-            onChange={(val) => updateCode(val)}
-          />
+        {/* ================= EDITOR + OUTPUT ================= */}
+        <div className="flex flex-col flex-1">
 
-          {/* FIX 3 — LIVE CURSORS: dot tip at pointer position, label offset to the right */}
-          {others.map((user) => {
-            const cursor = user.presence?.cursor;
-            if (!cursor) return null;
-            const color = user.presence?.color;
-            const name = user.presence?.name || "Guest";
+          {/* EDITOR */}
+          <div className={`${showOutput ? "h-[60%]" : "h-full"} relative`}>
+            <div
+              ref={editorRef}
+              onPointerMove={handlePointerMove}
+              onPointerLeave={handlePointerLeave}
+              className="h-full relative"
+            >
+              <CodeMirror
+                value={code || ""}
+                height="100%"
+                theme={vscodeLight}
+                extensions={[languageExtensions[activeLanguage]]}
+                onChange={(val) => updateCode(val)}
+              />
 
-            return (
-              <div
-                key={user.connectionId}
-                style={{
-                  position: "absolute",
-                  left: cursor.x,
-                  top: cursor.y,
-                  // No transform: the dot tip now sits exactly at the pointer coords
-                  pointerEvents: "none",
-                  zIndex: 100,
-                }}
-              >
-                {/* Cursor Dot — tip at (0,0) of this container */}
-                <div
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: color,
-                    // Small shadow so dot is visible on light backgrounds
-                    boxShadow: "0 0 0 2px rgba(0,0,0,0.25)",
-                  }}
-                />
+              {/* LIVE CURSORS */}
+              {others.map((user) => {
+                const cursor = user.presence?.cursor;
+                if (!cursor) return null;
 
-                {/* Name Label — offset to the right of the dot, vertically centered */}
-                <div
-                  style={{
-                    position: "absolute",
-                    top: -4,          // vertically aligns label center with dot center
-                    left: 14,         // shifts label to the right of the dot
-                    background: color,
-                    color: "white",
-                    fontSize: 11,
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {name}
-                </div>
+                return (
+                  <div
+                    key={user.connectionId}
+                    style={{
+                      position: "absolute",
+                      left: cursor.x,
+                      top: cursor.y,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: user.presence?.color,
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 14,
+                        top: -4,
+                        background: user.presence?.color,
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        fontSize: 11,
+                      }}
+                    >
+                      {user.presence?.name}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* OUTPUT PANEL */}
+          {showOutput && (
+            <div className="h-[40%] bg-black border-t border-gray-700 flex flex-col">
+              
+              <div className="flex justify-between px-3 py-2 bg-gray-900">
+                <span className="text-xs text-gray-400 uppercase">
+                  Output
+                </span>
+
+                <button onClick={() => setShowOutput(false)}>✕</button>
               </div>
-            );
-          })}
+
+              <div className="flex-1 overflow-auto p-3">
+                <pre
+                  className={`whitespace-pre-wrap ${
+                    output?.toLowerCase().includes("error")
+                      ? "text-red-400"
+                      : "text-green-400"
+                  }`} key={output}
+                >
+                  {output}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* RIGHT PANEL */}
       <div className="w-48 bg-gray-800 p-4">
-        <p className="text-xs text-gray-400 uppercase tracking-wider">Panel</p>
+        <p className="text-xs text-gray-400 uppercase">Panel</p>
       </div>
     </div>
   );

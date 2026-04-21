@@ -24,6 +24,7 @@ export default function App() {
       initialStorage={{
         code: "// Start coding here...",
         language: "javascript", // 🔹 FIX 1: default shared language
+        output: "Click ▶ Run to execute code", // ✅ NEW
       }}
     >
       <Editor />
