@@ -276,6 +276,18 @@ function Editor() {
   };
   const displayFileName = sharedFileName || defaultFileNames[activeLanguage];
 
+  //==================
+  //link copy function
+  //==================
+  const handleCopyLink = () => {
+  navigator.clipboard.writeText(window.location.href);
+
+ setToast({
+  message: "🔗 Link copied! Share it with your team",
+  type: "success",
+});
+};
+
   // =========================
   // 🚀 Run Code (Judge0 via RapidAPI)
   // =========================
@@ -585,6 +597,25 @@ function Editor() {
 
           {/* Spacer */}
           <div style={{ flex: 1 }} />
+
+          <button
+            onClick={handleCopyLink}
+            style={{
+              background: "#0ea5e9",
+              border: "1px solid #38bdf8",
+              color: "#e0f2fe",
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "4px 10px",
+              borderRadius: 4,
+              cursor: "pointer",
+              marginRight: 8,
+            }}
+          >
+            🔗 Copy Link
+          </button>
+
+          
 
           {/* Toggle AI Panel button */}
           <button
@@ -920,7 +951,7 @@ function Editor() {
           fontSize: 13, fontWeight: 500,
           boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
           zIndex: 9999,
-          animation: "fadeIn 0.2s ease",
+          animation: "fadeIn 0.25s ease, slideUp 0.25s ease",
         }}>
           {toast.type === "success" ? "✓" : "✕"} {toast.message}
         </div>
@@ -972,6 +1003,10 @@ function Editor() {
           background: #1e293b;
           border-radius: 2px;
         }
+         @keyframes slideUp {
+  from { transform: translateY(10px); }
+  to { transform: translateY(0); }
+} 
       `}</style>
     </div>
   );
