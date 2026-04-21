@@ -23,6 +23,7 @@ const {
     code: "",
     language: "javascript", // 🔹 FIX 1: shared language state
     output: "", // ✅ NEW (shared output)
+    fileName: null, // shared filename, null = using default
   },
 });
 

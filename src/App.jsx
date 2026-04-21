@@ -25,6 +25,7 @@ export default function App() {
         code: "// Start coding here...",
         language: "javascript", // 🔹 FIX 1: default shared language
         output: "Click ▶ Run to execute code", // ✅ NEW
+        fileName: null, // shared filename — set when someone opens a file
       }}
     >
       <Editor />
