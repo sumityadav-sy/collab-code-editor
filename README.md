@@ -1,13 +1,10 @@
 # CollabEditor
-
-A real-time multiplayer code editor built for teams. Multiple users can write, run, and debug code together in a shared room with live cursors, AI assistance, and instant room sharing — all in the browser.
-```
-# 🚀 Collab Editor
-
-[![Live Demo](https://img.shields.io/badge/🚀%20Live%20Project-Click%20Here-blue?style=for-the-badge)](https://collab-code-editor-one.vercel.app/)
+> 🌐 Try the app live here:  
+> 👉 https://your-project-link.com
 
 ---
 
+A real-time multiplayer code editor built for teams. Multiple users can write, run, and debug code together in a shared room with live cursors, AI assistance, and instant room sharing — all in the browser.
 ---
 
 ## Badges
