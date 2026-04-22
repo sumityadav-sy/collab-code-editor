@@ -72,6 +72,8 @@ A real-time multiplayer code editor built for teams. Multiple users can write, r
 ---
 
 ## Project Structure
+
+```
 collab-editor
 ├── collab-editor-backend
 │ ├── node_modules
@@ -101,7 +103,7 @@ collab-editor
 ├── index.html
 ├── package.json
 └── README.md
-
+```
 
 ---
 
