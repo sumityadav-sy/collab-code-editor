@@ -1,6 +1,6 @@
 # CollabEditor
 > 🌐 Try the app live here:  
-> 👉 https://your-project-link.com
+> 👉 https://collab-code-editor-one.vercel.app/
 
 ---
 
