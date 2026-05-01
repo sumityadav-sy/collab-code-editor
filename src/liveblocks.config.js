@@ -24,6 +24,9 @@ const {
     language: "javascript", // 🔹 FIX 1: shared language state
     output: "", // ✅ NEW (shared output)
     fileName: null, // shared filename, null = using default
+     // 🔐 NEW: line-level lock map
+    // key = line number (string), value = { name, color, connectionId }
+    lockedLines: new LiveMap(),
   },
 });
 
