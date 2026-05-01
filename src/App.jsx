@@ -48,7 +48,6 @@ function RoomWrapper() {
         language: "javascript",
         output: "Click ▶ Run to execute code",
         fileName: null,
-        lockedLines: new LiveMap(), // 🔐 NEW
       }}
     >
       <Editor />

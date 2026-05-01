@@ -1,12 +1,10 @@
-import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useRef, useState, useEffect } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
 import { java } from "@codemirror/lang-java";
 import { cpp } from "@codemirror/lang-cpp";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
-import { EditorState } from "@codemirror/state";
-import { Decoration, DecorationSet, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import { useParams } from "react-router-dom";
 
 import {
@@ -52,7 +50,7 @@ function Avatar({ name, color, size = 28, style = {} }) {
 }
 
 // ─── Collaborator Card ────────────────────────────────────────────────────────
-function CollaboratorCard({ name, color, line, col, isYou, lockedLine }) {
+function CollaboratorCard({ name, color, line, col, isYou }) {
   return (
     <div style={{
       borderLeft: `3px solid ${color}`,
@@ -64,14 +62,6 @@ function CollaboratorCard({ name, color, line, col, isYou, lockedLine }) {
         <span style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {isYou ? `${name} (You)` : name}
         </span>
-        {lockedLine && (
-          <span style={{
-            fontSize: 9, background: `${color}22`, border: `1px solid ${color}55`,
-            color: color, borderRadius: 3, padding: "1px 5px", marginLeft: "auto", flexShrink: 0,
-          }}>
-            🔐 L{lockedLine}
-          </span>
-        )}
       </div>
       <div style={{ marginTop: 5, fontSize: 11, color: (line != null && col != null) ? "#94a3b8" : "#4b5563", paddingLeft: 14 }}>
         {(line != null && col != null) ? `Line ${line} · Col ${col}` : "Idle"}
@@ -103,129 +93,6 @@ function ChatMessage({ role, text }) {
   );
 }
 
-// ─── Lock Badge Widget (inline in gutter area) ───────────────────────────────
-class LockBadgeWidget extends WidgetType {
-  constructor(name, color) {
-    super();
-    this.name = name;
-    this.color = color;
-  }
-  toDOM() {
-    const wrap = document.createElement("span");
-    wrap.style.cssText = `
-      display: inline-flex; align-items: center; gap: 3px;
-      margin-left: 8px; padding: 1px 6px;
-      background: ${this.color}22; border: 1px solid ${this.color}55;
-      border-radius: 3px; font-size: 10px; font-family: monospace;
-      color: ${this.color}; pointer-events: none; vertical-align: middle;
-      white-space: nowrap;
-    `;
-    wrap.innerHTML = `🔐 ${this.name}`;
-    return wrap;
-  }
-  eq(other) { return other.name === this.name && other.color === this.color; }
-  ignoreEvent() { return true; }
-}
-
-// ─── Build CodeMirror decorations for locked lines ───────────────────────────
-function buildLockDecorations(state, lockedLinesMap, myConnectionId) {
-  const decorations = [];
-  const lineCount = state.doc.lines;
-
-  for (const [lineNumStr, lockInfo] of lockedLinesMap) {
-    const lineNum = Number(lineNumStr);
-    if (lineNum < 1 || lineNum > lineCount) continue;
-    const isOtherUser = lockInfo.connectionId !== myConnectionId;
-    if (!isOtherUser) continue; // don't decorate your own locked line
-
-    const line = state.doc.line(lineNum);
-
-    // Background highlight on the whole line
-    decorations.push(
-      Decoration.line({
-        attributes: {
-          style: `background: ${lockInfo.color}11; border-left: 3px solid ${lockInfo.color}; box-sizing: border-box;`,
-        },
-      }).range(line.from)
-    );
-
-    // Badge widget at end of line
-    decorations.push(
-      Decoration.widget({
-        widget: new LockBadgeWidget(lockInfo.name, lockInfo.color),
-        side: 1,
-      }).range(line.to)
-    );
-  }
-
-  return Decoration.set(decorations, true);
-}
-
-// ─── CodeMirror extension: block editing on locked lines ─────────────────────
-function createLockExtension(getLockedLinesMap, getMyConnectionId) {
-  // Transaction filter: block input on locked lines
-  const blockFilter = EditorState.transactionFilter.of((tr) => {
-    if (!tr.docChanged) return tr;
-    const lockedMap = getLockedLinesMap();
-    const myConnId = getMyConnectionId();
-    if (!lockedMap || lockedMap.size === 0) return tr;
-
-    let blocked = false;
-    tr.changes.iterChangedRanges((fromA) => {
-      const lineNum = tr.startState.doc.lineAt(fromA).number;
-      const lock = lockedMap.get(String(lineNum));
-      if (lock && lock.connectionId !== myConnId) {
-        blocked = true;
-      }
-    });
-
-    if (blocked) return []; // cancel the transaction
-    return tr;
-  });
-
-  // ViewPlugin: render decorations
-  const decorPlugin = ViewPlugin.fromClass(
-    class {
-      constructor(view) {
-        this.decorations = buildLockDecorations(view.state, getLockedLinesMap(), getMyConnectionId());
-      }
-      update(update) {
-        this.decorations = buildLockDecorations(update.view.state, getLockedLinesMap(), getMyConnectionId());
-      }
-    },
-    { decorations: (v) => v.decorations }
-  );
-
-  return [blockFilter, decorPlugin];
-}
-
-// ─── Blocked Toast Notification ──────────────────────────────────────────────
-function BlockedToast({ lockerName, lockerColor, lineNum, visible }) {
-  if (!visible) return null;
-  return (
-    <div style={{
-      position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)",
-      background: "#1e293b",
-      border: `1px solid ${lockerColor}`,
-      borderRadius: 8, padding: "10px 18px",
-      display: "flex", alignItems: "center", gap: 10,
-      zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-      animation: "fadeInDown 0.2s ease",
-      pointerEvents: "none",
-    }}>
-      <span style={{ fontSize: 16 }}>🔐</span>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: lockerColor }}>
-          Line {lineNum} is locked by {lockerName}
-        </div>
-        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-          Wait for them to finish editing this line
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Editor ──────────────────────────────────────────────────────────────
 function Editor() {
   const { roomId } = useParams();
@@ -240,29 +107,10 @@ function Editor() {
   const sharedFileName = useStorage((root) => root.fileName);
   const updateSharedFileName = useMutation(({ storage }, v) => storage.set("fileName", v), []);
 
-  // 🔐 Locked lines storage (LiveMap)
-  const lockedLines = useStorage((root) => root.lockedLines);
-
-  const lockLine = useMutation(({ storage }, lineNum, lockInfo) => {
-    storage.get("lockedLines").set(String(lineNum), lockInfo);
-  }, []);
-
-  const unlockLine = useMutation(({ storage }, lineNum) => {
-    storage.get("lockedLines").delete(String(lineNum));
-  }, []);
-
-  const unlockAllMyLines = useMutation(({ storage }, myConnId) => {
-    const map = storage.get("lockedLines");
-    for (const [key, val] of map.entries()) {
-      if (val.connectionId === myConnId) map.delete(key);
-    }
-  }, []);
-
   // Local state
   const [isRunning, setIsRunning] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
   const [toast, setToast] = useState(null);
-  const [blockedToast, setBlockedToast] = useState(null);
   const [messages, setMessages] = useState([
     { role: "ai", text: "👋 Hi! I can explain your code, find bugs, or suggest improvements. Ask me anything or use a quick action below." }
   ]);
@@ -278,36 +126,6 @@ function Editor() {
   const [myPresence, updateMyPresence] = useMyPresence();
   const others = useOthers();
 
-  // Stable refs for the lock extension closures
-  const lockedLinesRef = useRef(lockedLines);
-  const myConnectionIdRef = useRef(null);
-  const currentLineRef = useRef(null); // currently held lock line
-
-  // Keep lockedLinesRef in sync
-  useEffect(() => {
-    lockedLinesRef.current = lockedLines;
-  }, [lockedLines]);
-
-  // Get my connection ID from presence (liveblocks doesn't expose it directly, we generate one)
-  const myConnId = useMemo(() => {
-    const stored = sessionStorage.getItem("connId");
-    if (stored) return stored;
-    const id = Math.random().toString(36).substring(2, 10);
-    sessionStorage.setItem("connId", id);
-    return id;
-  }, []);
-
-  useEffect(() => {
-    myConnectionIdRef.current = myConnId;
-  }, [myConnId]);
-
-  // Cleanup: release all my locks on unmount
-  useEffect(() => {
-    return () => {
-      unlockAllMyLines(myConnId);
-    };
-  }, []);
-
   const activeLanguage = language || "javascript";
 
   // ── Effects ──
@@ -322,32 +140,14 @@ function Editor() {
   }, [toast]);
 
   useEffect(() => {
-    if (!blockedToast) return;
-    const t = setTimeout(() => setBlockedToast(null), 2000);
-    return () => clearTimeout(t);
-  }, [blockedToast]);
-
-  useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isAiLoading]);
 
-  // ── Lock extension (stable, created once) ────────────────────────────────
-  const lockExtension = useMemo(() => createLockExtension(
-    () => lockedLinesRef.current,
-    () => myConnectionIdRef.current
-  ), []);
-
-  // ── Cursor tracking + line locking ──────────────────────────────────────
+  // ── Cursor tracking ──
   const handlePointerMove = useCallback((e) => {
     const rect = editorRef.current?.getBoundingClientRect();
     if (!rect) return;
-    updateMyPresence({
-      cursor: {
-        ...(myPresence?.cursor || {}),
-        x: Math.round(e.clientX - rect.left),
-        y: Math.round(e.clientY - rect.top),
-      }
-    });
+    updateMyPresence({ cursor: { ...(myPresence?.cursor || {}), x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) } });
   }, [updateMyPresence, myPresence]);
 
   const handlePointerLeave = useCallback(() => {
@@ -355,50 +155,12 @@ function Editor() {
   }, [updateMyPresence, myPresence]);
 
   const handleEditorUpdate = useCallback((viewUpdate) => {
-    if (!viewUpdate.selectionSet && !viewUpdate.docChanged) return;
+    if (!viewUpdate.selectionSet) return;
     const state = viewUpdate.state;
     const head = state.selection.main.head;
     const line = state.doc.lineAt(head);
-    const lineNum = line.number;
-    const col = head - line.from + 1;
-
-    updateMyPresence({ cursor: { ...(myPresence?.cursor || {}), line: lineNum, col } });
-
-    const prevLine = currentLineRef.current;
-
-    // 🔐 Lock new line if it changed and not locked by someone else
-    if (lineNum !== prevLine) {
-      // Release old lock
-      if (prevLine !== null) {
-        unlockLine(prevLine);
-      }
-
-      // Claim new line if it's free
-      const existingLock = lockedLinesRef.current?.get(String(lineNum));
-      if (!existingLock || existingLock.connectionId === myConnId) {
-        lockLine(lineNum, {
-          name: myPresence?.name || "Someone",
-          color: myPresence?.color || "#6366f1",
-          connectionId: myConnId,
-        });
-        currentLineRef.current = lineNum;
-      }
-      // else: line is locked by someone else — don't claim it
-    }
-  }, [updateMyPresence, myPresence, lockLine, unlockLine, myConnId]);
-
-  // When user tries to type on a blocked line, show a toast
-  const handleBeforeChange = useCallback((viewUpdate) => {
-    if (!viewUpdate.docChanged) return;
-    // Check if any changed range hit a locked line
-    viewUpdate.changes?.iterChangedRanges?.((fromA) => {
-      const lineNum = viewUpdate.startState?.doc?.lineAt(fromA)?.number;
-      const lock = lockedLinesRef.current?.get(String(lineNum));
-      if (lock && lock.connectionId !== myConnId) {
-        setBlockedToast({ name: lock.name, color: lock.color, lineNum });
-      }
-    });
-  }, [myConnId]);
+    updateMyPresence({ cursor: { ...(myPresence?.cursor || {}), line: line.number, col: head - line.from + 1 } });
+  }, [updateMyPresence, myPresence]);
 
   // ── File ops ──
   const handleOpenFile = useCallback((e) => {
@@ -429,6 +191,7 @@ function Editor() {
     setToast({ message: `Saved: ${filename}`, type: "success" });
   }, [code, activeLanguage, sharedFileName]);
 
+  // ── Bug Fix #2: Copy the JOIN url, not the editor url ──
   const handleCopyLink = () => {
     const joinUrl = `${window.location.origin}/room/${roomId}`;
     navigator.clipboard.writeText(joinUrl);
@@ -514,31 +277,14 @@ function Editor() {
   const displayFileName = sharedFileName || { javascript: "main.js", python: "main.py", java: "Main.java", cpp: "main.cpp" }[activeLanguage];
   const totalUsers = 1 + others.count;
 
-  // Build a map of connectionId → locked line for sidebar display
-  const myLockedLine = lockedLines ? (() => {
-    for (const [lineStr, info] of lockedLines) {
-      if (info.connectionId === myConnId) return Number(lineStr);
-    }
-    return null;
-  })() : null;
-
-  const otherLockedLines = useMemo(() => {
-    const map = {}; // connectionId → lineNum
-    if (!lockedLines) return map;
-    for (const [lineStr, info] of lockedLines) {
-      if (info.connectionId !== myConnId) {
-        map[info.connectionId] = Number(lineStr);
-      }
-    }
-    return map;
-  }, [lockedLines, myConnId]);
-
-  // ─── AI Panel Content ───────────────────────────────────────────────────────
+  // ─── AI Panel (shared between desktop sidebar and mobile drawer) ───────────
   const AiPanelContent = (
     <>
+      {/* AI Panel Header */}
       <div style={{
         padding: "10px 14px", borderBottom: "1px solid #1e293b",
-        background: "#0f172a", display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+        background: "#0f172a", display: "flex", alignItems: "center", gap: 8,
+        flexShrink: 0,
       }}>
         <div style={{
           width: 24, height: 24, borderRadius: 6,
@@ -550,6 +296,7 @@ function Editor() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>AI Assistant</div>
           <div style={{ fontSize: 10, color: "#475569" }}>Powered by Claude via OpenRouter</div>
         </div>
+        {/* Close button on mobile */}
         <button
           onClick={() => setIsMobileAiOpen(false)}
           className="mobile-only"
@@ -557,6 +304,7 @@ function Editor() {
         >×</button>
       </div>
 
+      {/* Quick Actions */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e293b", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
         <p style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Quick Actions</p>
         {quickActions.map((action) => (
@@ -577,6 +325,7 @@ function Editor() {
         ))}
       </div>
 
+      {/* Chat history */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column" }}>
         {messages.map((msg, i) => <ChatMessage key={i} role={msg.role} text={msg.text} />)}
         {isAiLoading && (
@@ -592,6 +341,7 @@ function Editor() {
         <div ref={chatBottomRef} />
       </div>
 
+      {/* Input */}
       <div style={{ padding: "10px 12px", borderTop: "1px solid #1e293b", background: "#0f172a", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
           <textarea
@@ -634,23 +384,19 @@ function Editor() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#111827", color: "#fff" }}>
 
-      {/* ── BLOCKED TOAST ─────────────────────────────────────────────────── */}
-      {blockedToast && (
-        <BlockedToast
-          lockerName={blockedToast.name}
-          lockerColor={blockedToast.color}
-          lineNum={blockedToast.lineNum}
-          visible
-        />
-      )}
-
       {/* ═══════════════════════════════════════
           TOP NAVBAR
       ═══════════════════════════════════════ */}
       <div style={{
-        height: 48, background: "#0f172a", borderBottom: "1px solid #1e293b",
-        display: "flex", alignItems: "center", padding: "0 14px", gap: 12,
-        flexShrink: 0, zIndex: 20,
+        height: 48,
+        background: "#0f172a",
+        borderBottom: "1px solid #1e293b",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 14px",
+        gap: 12,
+        flexShrink: 0,
+        zIndex: 20,
       }}>
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 8 }}>
@@ -658,20 +404,25 @@ function Editor() {
             width: 28, height: 28, borderRadius: 7,
             background: "linear-gradient(135deg, #6366f1, #06b6d4)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14, flexShrink: 0, boxShadow: "0 0 12px rgba(99,102,241,0.3)",
+            fontSize: 14, flexShrink: 0,
+            boxShadow: "0 0 12px rgba(99,102,241,0.3)",
           }}>
-            <img src={`${window.location.origin}/coollab_logo.png`} style={{ width: 22, height: 22, objectFit: "contain", borderRadius: "4px" }} />
+            {/* Replace with: <img src={logo} style={{width:18,height:18}} /> */}
+             <img src={`${window.location.origin}/coollab_logo.png`} style={{ width: 22, height: 22, objectFit: "contain",borderRadius: '4px' }} />
+
           </div>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", letterSpacing: "-0.02em" }} className="hide-mobile">
             CollabEditor
           </span>
         </div>
 
-        {/* Room ID badge */}
+        {/* Room ID badge — center */}
         <div style={{
           display: "flex", alignItems: "center", gap: 7,
-          background: "rgba(255,255,255,0.04)", border: "1px solid #1e293b",
-          borderRadius: 6, padding: "4px 10px", marginRight: "auto",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid #1e293b",
+          borderRadius: 6, padding: "4px 10px",
+          marginRight: "auto",
         }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
           <span style={{ fontSize: 11, color: "#64748b", letterSpacing: "0.06em" }}>ROOM</span>
@@ -680,8 +431,9 @@ function Editor() {
           </span>
         </div>
 
-        {/* Right side */}
+        {/* Right side: avatars + copy link + AI toggle */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
           {/* Avatar stack */}
           <div style={{ display: "flex", alignItems: "center", marginRight: 6 }} title={`${totalUsers} online`}>
             {myPresence?.name && (
@@ -697,10 +449,12 @@ function Editor() {
           <button
             onClick={handleCopyLink}
             style={{
-              background: "rgba(14,165,233,0.1)", border: "1px solid rgba(14,165,233,0.25)",
+              background: "rgba(14,165,233,0.1)",
+              border: "1px solid rgba(14,165,233,0.25)",
               color: "#38bdf8", fontSize: 12, fontWeight: 600,
               padding: "5px 11px", borderRadius: 6, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 5, transition: "all 0.15s",
+              display: "flex", alignItems: "center", gap: 5,
+              transition: "all 0.15s",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(14,165,233,0.18)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(14,165,233,0.1)"; }}
@@ -708,7 +462,7 @@ function Editor() {
             🔗 <span className="hide-mobile">Copy Link</span>
           </button>
 
-          {/* AI toggle desktop */}
+          {/* AI toggle — desktop */}
           <button
             onClick={() => setShowAiPanel((v) => !v)}
             className="hide-mobile"
@@ -716,21 +470,24 @@ function Editor() {
               background: showAiPanel ? "#312e81" : "#1e293b",
               border: `1px solid ${showAiPanel ? "#6366f1" : "#334155"}`,
               color: showAiPanel ? "#a5b4fc" : "#64748b",
-              fontSize: 12, fontWeight: 600, padding: "5px 10px", borderRadius: 6, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 5, transition: "all 0.15s",
+              fontSize: 12, fontWeight: 600,
+              padding: "5px 10px", borderRadius: 6, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 5,
+              transition: "all 0.15s",
             }}
           >
             <span style={{ fontSize: 13 }}>✦</span>
             {showAiPanel ? "Hide AI" : "AI Chat"}
           </button>
 
-          {/* AI toggle mobile */}
+          {/* AI toggle — mobile */}
           <button
             onClick={() => setIsMobileAiOpen(true)}
             className="show-mobile"
             style={{
-              background: "#312e81", border: "1px solid #6366f1", color: "#a5b4fc",
-              fontSize: 13, width: 32, height: 32, borderRadius: 6, cursor: "pointer",
+              background: "#312e81", border: "1px solid #6366f1",
+              color: "#a5b4fc", fontSize: 13,
+              width: 32, height: 32, borderRadius: 6, cursor: "pointer",
               display: "none", alignItems: "center", justifyContent: "center",
             }}
           >✦</button>
@@ -738,15 +495,21 @@ function Editor() {
       </div>
 
       {/* ═══════════════════════════════════════
-          BODY
+          BODY (sidebar + editor + AI)
       ═══════════════════════════════════════ */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
 
         {/* LEFT SIDEBAR */}
         <div style={{
-          width: 180, background: "#0f172a", borderRight: "1px solid #1e293b",
-          display: "flex", flexDirection: "column", flexShrink: 0,
-        }} className="hide-mobile">
+          width: 180,
+          background: "#0f172a",
+          borderRight: "1px solid #1e293b",
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0,
+        }}
+          className="hide-mobile"
+        >
           <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid #1e293b" }}>
             <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", color: "#475569", textTransform: "uppercase", marginBottom: 2 }}>
               Collaborators
@@ -754,48 +517,12 @@ function Editor() {
             <p style={{ fontSize: 11, color: "#334155" }}>{totalUsers} online</p>
           </div>
 
-          {/* 🔐 Lock legend */}
-          {lockedLines && lockedLines.size > 0 && (
-            <div style={{ padding: "6px 12px", borderBottom: "1px solid #1e293b", background: "rgba(99,102,241,0.04)" }}>
-              <p style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-                🔐 Active Locks
-              </p>
-              {Array.from(lockedLines.entries()).map(([lineStr, info]) => (
-                <div key={lineStr} style={{
-                  display: "flex", alignItems: "center", gap: 6, marginBottom: 3,
-                  fontSize: 11, color: info.color,
-                }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: info.color, flexShrink: 0 }} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                    {info.connectionId === myConnId ? "You" : info.name}
-                  </span>
-                  <span style={{ fontSize: 10, color: "#475569", flexShrink: 0 }}>L{lineStr}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div style={{ padding: 10, overflowY: "auto", flex: 1 }}>
             {myPresence?.name && (
-              <CollaboratorCard
-                name={myPresence.name}
-                color={myPresence.color}
-                line={myPresence.cursor?.line}
-                col={myPresence.cursor?.col}
-                isYou
-                lockedLine={myLockedLine}
-              />
+              <CollaboratorCard name={myPresence.name} color={myPresence.color} line={myPresence.cursor?.line} col={myPresence.cursor?.col} isYou />
             )}
             {others.map((user) => (
-              <CollaboratorCard
-                key={user.connectionId}
-                name={user.presence?.name || "Guest"}
-                color={user.presence?.color || "#6b7280"}
-                line={user.presence?.cursor?.line}
-                col={user.presence?.cursor?.col}
-                isYou={false}
-                lockedLine={otherLockedLines[user.presence?.connId] || null}
-              />
+              <CollaboratorCard key={user.connectionId} name={user.presence?.name || "Guest"} color={user.presence?.color || "#6b7280"} line={user.presence?.cursor?.line} col={user.presence?.cursor?.col} isYou={false} />
             ))}
           </div>
 
@@ -841,7 +568,8 @@ function Editor() {
           {/* TOOLBAR */}
           <div style={{
             background: "#1e293b", borderBottom: "1px solid #334155",
-            padding: "5px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+            padding: "5px 12px", display: "flex", alignItems: "center", gap: 10,
+            flexShrink: 0,
           }}>
             <span style={{ fontSize: 13, color: "#64748b" }}>Language:</span>
             <select
@@ -875,19 +603,6 @@ function Editor() {
               ) : "▶ Run"}
             </button>
 
-            {/* 🔐 Lock status indicator in toolbar */}
-            {myLockedLine && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: 5,
-                background: `${myPresence?.color || "#6366f1"}15`,
-                border: `1px solid ${myPresence?.color || "#6366f1"}40`,
-                borderRadius: 4, padding: "3px 8px", fontSize: 11,
-                color: myPresence?.color || "#6366f1",
-              }}>
-                🔐 Editing line {myLockedLine}
-              </div>
-            )}
-
             <div style={{ flex: 1 }} />
 
             {/* Output toggle */}
@@ -920,15 +635,9 @@ function Editor() {
                   height="100%"
                   style={{ height: "100%" }}
                   basicSetup={{ lineNumbers: true }}
-                  extensions={[
-                    languageExtensions[activeLanguage],
-                    lockExtension, // 🔐 line lock extension
-                  ]}
+                  extensions={[languageExtensions[activeLanguage]]}
                   onChange={(val) => updateCode(val)}
-                  onUpdate={(viewUpdate) => {
-                    handleEditorUpdate(viewUpdate);
-                    handleBeforeChange(viewUpdate);
-                  }}
+                  onUpdate={handleEditorUpdate}
                   theme={vscodeDark}
                 />
 
@@ -980,19 +689,21 @@ function Editor() {
           </div>
         </div>
 
-        {/* DESKTOP AI PANEL */}
+        {/* ── DESKTOP AI PANEL ─────────────────────────────────────────────── */}
         {showAiPanel && (
           <div style={{
             width: 300, flexShrink: 0,
             background: "#0a0f1e", borderLeft: "1px solid #1e293b",
             display: "flex", flexDirection: "column",
-          }} className="hide-mobile">
+          }}
+            className="hide-mobile"
+          >
             {AiPanelContent}
           </div>
         )}
       </div>
 
-      {/* MOBILE AI DRAWER */}
+      {/* ── MOBILE AI DRAWER ─────────────────────────────────────────────────── */}
       {isMobileAiOpen && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 100,
@@ -1013,7 +724,7 @@ function Editor() {
         </div>
       )}
 
-      {/* TOAST */}
+      {/* ── TOAST ─────────────────────────────────────────────────────────────── */}
       {toast && (
         <div style={{
           position: "fixed", bottom: 24, right: 24,
@@ -1035,7 +746,6 @@ function Editor() {
         .cm-gutters { background-color: #1e1e1e !important; color: #858585; border: none; }
 
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fadeInDown { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
         @keyframes slideUp { from { transform: translateY(10px); } to { transform: translateY(0); } }
         @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes spin { to { transform: rotate(360deg); } }
