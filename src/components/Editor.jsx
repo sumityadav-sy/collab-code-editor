@@ -93,11 +93,29 @@ function ChatMessage({ role, text }) {
   );
 }
 
+// ─── Lock Banner Item ──────────────────────────────────────────────────────────
+function LockTag({ lineNum, name, color }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      fontSize: 11, color: color,
+      background: `${color}18`,
+      border: `1px solid ${color}44`,
+      borderRadius: 5, padding: "2px 8px",
+      fontWeight: 500,
+    }}>
+      🔒 Line {lineNum}
+      <span style={{ color: "#64748b" }}>·</span>
+      <span style={{ color: "#94a3b8" }}>{name}</span>
+    </span>
+  );
+}
+
 // ─── Main Editor ──────────────────────────────────────────────────────────────
 function Editor() {
   const { roomId } = useParams();
 
-  // Shared storage
+  // ── Shared storage ──
   const code = useStorage((root) => root.code);
   const updateCode = useMutation(({ storage }, v) => storage.set("code", v), []);
   const language = useStorage((root) => root.language);
@@ -107,7 +125,44 @@ function Editor() {
   const sharedFileName = useStorage((root) => root.fileName);
   const updateSharedFileName = useMutation(({ storage }, v) => storage.set("fileName", v), []);
 
-  // Local state
+  // ── Line locking (shared via LiveMap) ──
+  const lockedLines = useStorage((root) => root.lockedLines);
+
+  // Claim a line for yourself
+  const claimLine = useMutation(({ storage }, lineNumber, info) => {
+    const map = storage.get("lockedLines");
+    if (!map) return;
+    const key = String(lineNumber);
+    const existing = map.get(key);
+    // Only claim if: unclaimed OR already yours (refresh)
+    if (!existing || existing.name === info.name) {
+      map.set(key, info);
+    }
+  }, []);
+
+  // Release a specific line if you own it
+  const releaseLine = useMutation(({ storage }, lineNumber, myName) => {
+    const map = storage.get("lockedLines");
+    if (!map) return;
+    const key = String(lineNumber);
+    const existing = map.get(key);
+    if (existing && existing.name === myName) {
+      map.delete(key);
+    }
+  }, []);
+
+  // Release ALL lines owned by this user (called on unmount / disconnect)
+  const releaseAllMyLines = useMutation(({ storage }, myName) => {
+    const map = storage.get("lockedLines");
+    if (!map) return;
+    const toDelete = [];
+    for (const [key, val] of map.entries()) {
+      if (val.name === myName) toDelete.push(key);
+    }
+    toDelete.forEach((k) => map.delete(k));
+  }, []);
+
+  // ── Local state ──
   const [isRunning, setIsRunning] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
   const [toast, setToast] = useState(null);
@@ -118,15 +173,37 @@ function Editor() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(true);
   const [isMobileAiOpen, setIsMobileAiOpen] = useState(false);
+  // Track last line number cursor was on, so we can release it when moving
+  const prevLineRef = useRef(null);
+
   const chatBottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const editorRef = useRef(null);
 
-  // Presence
+  // ── Presence ──
   const [myPresence, updateMyPresence] = useMyPresence();
   const others = useOthers();
 
   const activeLanguage = language || "javascript";
+  const myName = myPresence?.name;
+  const myColor = myPresence?.color;
+
+  // ── Release all lines on unmount ──
+  useEffect(() => {
+    return () => {
+      if (myName) releaseAllMyLines(myName);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Auto-release line after 8s of inactivity ──
+  const inactivityTimerRef = useRef(null);
+  const resetInactivityTimer = useCallback((lineNum) => {
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    inactivityTimerRef.current = setTimeout(() => {
+      if (myName && lineNum != null) releaseLine(lineNum, myName);
+    }, 8000);
+  }, [myName, releaseLine]);
 
   // ── Effects ──
   useEffect(() => {
@@ -147,20 +224,91 @@ function Editor() {
   const handlePointerMove = useCallback((e) => {
     const rect = editorRef.current?.getBoundingClientRect();
     if (!rect) return;
-    updateMyPresence({ cursor: { ...(myPresence?.cursor || {}), x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) } });
+    updateMyPresence({
+      cursor: {
+        ...(myPresence?.cursor || {}),
+        x: Math.round(e.clientX - rect.left),
+        y: Math.round(e.clientY - rect.top),
+      },
+    });
   }, [updateMyPresence, myPresence]);
 
   const handlePointerLeave = useCallback(() => {
-    updateMyPresence({ cursor: myPresence?.cursor ? { ...myPresence.cursor, x: null, y: null } : null });
+    updateMyPresence({
+      cursor: myPresence?.cursor ? { ...myPresence.cursor, x: null, y: null } : null,
+    });
   }, [updateMyPresence, myPresence]);
 
+  // ── Editor cursor update + line locking ──
   const handleEditorUpdate = useCallback((viewUpdate) => {
     if (!viewUpdate.selectionSet) return;
     const state = viewUpdate.state;
     const head = state.selection.main.head;
     const line = state.doc.lineAt(head);
-    updateMyPresence({ cursor: { ...(myPresence?.cursor || {}), line: line.number, col: head - line.from + 1 } });
-  }, [updateMyPresence, myPresence]);
+    const lineNum = line.number;
+
+    // Update presence cursor position
+    updateMyPresence({
+      cursor: { ...(myPresence?.cursor || {}), line: lineNum, col: head - line.from + 1 },
+    });
+
+    // Line locking: release previous line, claim new one
+    if (myName && myColor) {
+      const prev = prevLineRef.current;
+      if (prev !== null && prev !== lineNum) {
+        releaseLine(prev, myName);
+      }
+      prevLineRef.current = lineNum;
+      claimLine(lineNum, { name: myName, color: myColor });
+      resetInactivityTimer(lineNum);
+    }
+  }, [updateMyPresence, myPresence, myName, myColor, claimLine, releaseLine, resetInactivityTimer]);
+
+  // ── Check if a line is locked by someone else ──
+  // useStorage gives a plain object, so use bracket notation, not .get()
+  const isLineLockedByOther = useCallback((lineNum) => {
+    if (!lockedLines) return false;
+    const lock = lockedLines[String(lineNum)];
+    return lock && lock.name !== myName;
+  }, [lockedLines, myName]);
+
+  // ── Code change handler — blocks edits on locked lines ──
+  const handleCodeChange = useCallback((val, viewUpdate) => {
+    // If no viewUpdate info or no lockedLines, just update
+    if (!viewUpdate || !lockedLines || !myName) {
+      updateCode(val);
+      return;
+    }
+
+    // Check every changed range for locked lines owned by others
+    let blocked = false;
+    try {
+      viewUpdate.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+        if (blocked) return;
+        const state = viewUpdate.state;
+        const startLine = state.doc.lineAt(fromB).number;
+        const endLine = state.doc.lineAt(Math.min(toB, state.doc.length)).number;
+        for (let l = startLine; l <= endLine; l++) {
+          const lock = lockedLines[String(l)];
+          if (lock && lock.name !== myName) {
+            blocked = true;
+            break;
+          }
+        }
+      });
+    } catch {
+      // If iteration fails, allow the change
+      blocked = false;
+    }
+
+    if (blocked) {
+      // Show a toast once
+      setToast({ message: "🔒 That line is locked by another user", type: "error" });
+      return; // Do NOT call updateCode — CodeMirror will revert via controlled value
+    }
+
+    updateCode(val);
+  }, [lockedLines, myName, updateCode]);
 
   // ── File ops ──
   const handleOpenFile = useCallback((e) => {
@@ -191,7 +339,6 @@ function Editor() {
     setToast({ message: `Saved: ${filename}`, type: "success" });
   }, [code, activeLanguage, sharedFileName]);
 
-  // ── Bug Fix #2: Copy the JOIN url, not the editor url ──
   const handleCopyLink = () => {
     const joinUrl = `${window.location.origin}/room/${roomId}`;
     navigator.clipboard.writeText(joinUrl);
@@ -230,7 +377,7 @@ function Editor() {
         else { result = data.stdout || data.stderr || data.compile_output || "No output"; break; }
       }
       updateOutput((result || "Execution timed out") + " ");
-    } catch (err) {
+    } catch {
       updateOutput("Error running code");
     }
     setIsRunning(false);
@@ -252,7 +399,7 @@ function Editor() {
       const data = await res.json();
       setMessages((prev) => [...prev, { role: "ai", text: data.reply || "No response from AI." }]);
     } catch {
-      setMessages((prev) => [...prev, { role: "ai", text: "⚠️ Could not reach the AI server. Make sure your backend is running on localhost:3001." }]);
+      setMessages((prev) => [...prev, { role: "ai", text: "⚠️ Could not reach the AI server. Make sure your backend is running." }]);
     }
     setIsAiLoading(false);
   };
@@ -277,10 +424,15 @@ function Editor() {
   const displayFileName = sharedFileName || { javascript: "main.js", python: "main.py", java: "Main.java", cpp: "main.cpp" }[activeLanguage];
   const totalUsers = 1 + others.count;
 
-  // ─── AI Panel (shared between desktop sidebar and mobile drawer) ───────────
+  // ── Build locked lines list for banner (only others' locks) ──
+  // useStorage returns a plain read-only object (not a LiveMap), so we use Object.entries
+  const othersLocks = lockedLines
+    ? Object.entries(lockedLines).filter(([, info]) => info && info.name !== myName)
+    : [];
+
+  // ── AI Panel Content ──────────────────────────────────────────────────────
   const AiPanelContent = (
     <>
-      {/* AI Panel Header */}
       <div style={{
         padding: "10px 14px", borderBottom: "1px solid #1e293b",
         background: "#0f172a", display: "flex", alignItems: "center", gap: 8,
@@ -296,7 +448,6 @@ function Editor() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>AI Assistant</div>
           <div style={{ fontSize: 10, color: "#475569" }}>Powered by Claude via OpenRouter</div>
         </div>
-        {/* Close button on mobile */}
         <button
           onClick={() => setIsMobileAiOpen(false)}
           className="mobile-only"
@@ -304,7 +455,6 @@ function Editor() {
         >×</button>
       </div>
 
-      {/* Quick Actions */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e293b", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
         <p style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Quick Actions</p>
         {quickActions.map((action) => (
@@ -325,7 +475,6 @@ function Editor() {
         ))}
       </div>
 
-      {/* Chat history */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column" }}>
         {messages.map((msg, i) => <ChatMessage key={i} role={msg.role} text={msg.text} />)}
         {isAiLoading && (
@@ -341,7 +490,6 @@ function Editor() {
         <div ref={chatBottomRef} />
       </div>
 
-      {/* Input */}
       <div style={{ padding: "10px 12px", borderTop: "1px solid #1e293b", background: "#0f172a", flexShrink: 0 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
           <textarea
@@ -384,9 +532,7 @@ function Editor() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#111827", color: "#fff" }}>
 
-      {/* ═══════════════════════════════════════
-          TOP NAVBAR
-      ═══════════════════════════════════════ */}
+      {/* ═══ TOP NAVBAR ═══ */}
       <div style={{
         height: 48,
         background: "#0f172a",
@@ -407,16 +553,14 @@ function Editor() {
             fontSize: 14, flexShrink: 0,
             boxShadow: "0 0 12px rgba(99,102,241,0.3)",
           }}>
-            {/* Replace with: <img src={logo} style={{width:18,height:18}} /> */}
-             <img src={`${window.location.origin}/coollab_logo.png`} style={{ width: 22, height: 22, objectFit: "contain",borderRadius: '4px' }} />
-
+            <img src={`${window.location.origin}/coollab_logo.png`} style={{ width: 22, height: 22, objectFit: "contain", borderRadius: "4px" }} />
           </div>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", letterSpacing: "-0.02em" }} className="hide-mobile">
             CollabEditor
           </span>
         </div>
 
-        {/* Room ID badge — center */}
+        {/* Room badge */}
         <div style={{
           display: "flex", alignItems: "center", gap: 7,
           background: "rgba(255,255,255,0.04)",
@@ -431,10 +575,8 @@ function Editor() {
           </span>
         </div>
 
-        {/* Right side: avatars + copy link + AI toggle */}
+        {/* Right: avatars + copy + AI toggle */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-
-          {/* Avatar stack */}
           <div style={{ display: "flex", alignItems: "center", marginRight: 6 }} title={`${totalUsers} online`}>
             {myPresence?.name && (
               <Avatar name={myPresence.name} color={myPresence.color || "#6366f1"} style={{ marginLeft: 0 }} />
@@ -445,7 +587,6 @@ function Editor() {
             <span style={{ fontSize: 11, color: "#475569", marginLeft: 10 }}>{totalUsers} online</span>
           </div>
 
-          {/* Copy Link */}
           <button
             onClick={handleCopyLink}
             style={{
@@ -462,7 +603,6 @@ function Editor() {
             🔗 <span className="hide-mobile">Copy Link</span>
           </button>
 
-          {/* AI toggle — desktop */}
           <button
             onClick={() => setShowAiPanel((v) => !v)}
             className="hide-mobile"
@@ -480,7 +620,6 @@ function Editor() {
             {showAiPanel ? "Hide AI" : "AI Chat"}
           </button>
 
-          {/* AI toggle — mobile */}
           <button
             onClick={() => setIsMobileAiOpen(true)}
             className="show-mobile"
@@ -494,9 +633,7 @@ function Editor() {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════
-          BODY (sidebar + editor + AI)
-      ═══════════════════════════════════════ */}
+      {/* ═══ BODY ═══ */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
 
         {/* LEFT SIDEBAR */}
@@ -531,8 +668,8 @@ function Editor() {
             <p style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>File</p>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, padding: "5px 8px", background: "#1e293b", borderRadius: 5 }}>
               <svg width="11" height="13" viewBox="0 0 11 13" fill="none">
-                <path d="M1 1h6l3 3v8H1V1z" stroke="#64748b" strokeWidth="1.2" fill="none" strokeLinejoin="round"/>
-                <path d="M7 1v3h3" stroke="#64748b" strokeWidth="1.2" strokeLinejoin="round"/>
+                <path d="M1 1h6l3 3v8H1V1z" stroke="#64748b" strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+                <path d="M7 1v3h3" stroke="#64748b" strokeWidth="1.2" strokeLinejoin="round" />
               </svg>
               <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {displayFileName}
@@ -544,7 +681,7 @@ function Editor() {
               onMouseLeave={(e) => { e.currentTarget.style.background = "#60a5fa11"; e.currentTarget.style.borderColor = "#60a5fa33"; }}
             >
               <svg width="13" height="11" viewBox="0 0 13 11" fill="none">
-                <path d="M1 2.5h3l1.5-1.5h4L11 2.5h1v8H1v-8z" stroke="#60a5fa" strokeWidth="1.1" fill="none" strokeLinejoin="round"/>
+                <path d="M1 2.5h3l1.5-1.5h4L11 2.5h1v8H1v-8z" stroke="#60a5fa" strokeWidth="1.1" fill="none" strokeLinejoin="round" />
               </svg>
               Open File
             </button>
@@ -553,9 +690,9 @@ function Editor() {
               onMouseLeave={(e) => { e.currentTarget.style.background = "#4ade8011"; e.currentTarget.style.borderColor = "#4ade8033"; }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <rect x="1" y="1" width="10" height="10" rx="1.5" stroke="#4ade80" strokeWidth="1.1" fill="none"/>
-                <rect x="3.5" y="1" width="5" height="3.5" rx="0.5" stroke="#4ade80" strokeWidth="1.1" fill="none"/>
-                <rect x="2.5" y="6" width="7" height="4" rx="0.5" stroke="#4ade80" strokeWidth="1.1" fill="none"/>
+                <rect x="1" y="1" width="10" height="10" rx="1.5" stroke="#4ade80" strokeWidth="1.1" fill="none" />
+                <rect x="3.5" y="1" width="5" height="3.5" rx="0.5" stroke="#4ade80" strokeWidth="1.1" fill="none" />
+                <rect x="2.5" y="6" width="7" height="4" rx="0.5" stroke="#4ade80" strokeWidth="1.1" fill="none" />
               </svg>
               Save File
             </button>
@@ -605,7 +742,6 @@ function Editor() {
 
             <div style={{ flex: 1 }} />
 
-            {/* Output toggle */}
             <button
               onClick={() => setShowOutput((v) => !v)}
               style={{
@@ -618,6 +754,37 @@ function Editor() {
               {showOutput ? "▼ Output" : "▲ Output"}
             </button>
           </div>
+
+          {/* ── LOCKED LINES BANNER ── */}
+          {othersLocks.length > 0 && (
+            <div style={{
+              background: "rgba(30, 27, 75, 0.95)",
+              borderBottom: "1px solid #312e81",
+              padding: "5px 12px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              flexShrink: 0,
+              minHeight: 32,
+            }}>
+              <span style={{
+                fontSize: 10,
+                color: "#6366f1",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>
+                🔒 Locked
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {othersLocks.map(([lineNum, info]) => (
+                  <LockTag key={lineNum} lineNum={lineNum} name={info.name} color={info.color} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* EDITOR + OUTPUT */}
           <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -636,7 +803,7 @@ function Editor() {
                   style={{ height: "100%" }}
                   basicSetup={{ lineNumbers: true }}
                   extensions={[languageExtensions[activeLanguage]]}
-                  onChange={(val) => updateCode(val)}
+                  onChange={handleCodeChange}
                   onUpdate={handleEditorUpdate}
                   theme={vscodeDark}
                 />
@@ -689,7 +856,7 @@ function Editor() {
           </div>
         </div>
 
-        {/* ── DESKTOP AI PANEL ─────────────────────────────────────────────── */}
+        {/* DESKTOP AI PANEL */}
         {showAiPanel && (
           <div style={{
             width: 300, flexShrink: 0,
@@ -703,7 +870,7 @@ function Editor() {
         )}
       </div>
 
-      {/* ── MOBILE AI DRAWER ─────────────────────────────────────────────────── */}
+      {/* MOBILE AI DRAWER */}
       {isMobileAiOpen && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 100,
@@ -724,7 +891,7 @@ function Editor() {
         </div>
       )}
 
-      {/* ── TOAST ─────────────────────────────────────────────────────────────── */}
+      {/* TOAST */}
       {toast && (
         <div style={{
           position: "fixed", bottom: 24, right: 24,
@@ -734,6 +901,7 @@ function Editor() {
           padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 500,
           boxShadow: "0 4px 20px rgba(0,0,0,0.5)", zIndex: 9999,
           animation: "fadeIn 0.25s ease, slideUp 0.25s ease",
+          maxWidth: 320,
         }}>
           {toast.type === "success" ? "✓" : "✕"} {toast.message}
         </div>

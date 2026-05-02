@@ -1,6 +1,6 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, useParams, useNavigate } from "react-router-dom";
-import { RoomProvider } from "./liveblocks.config";
+import { RoomProvider, LiveMap } from "./liveblocks.config";
 import Editor from "./components/Editor";
 import { COLORS } from "./utils/presence";
 import JoinRoom from "./pages/JoinRoom";
@@ -19,11 +19,6 @@ function RoomWrapper() {
 
   if (!username) return null;
 
-  // ── Color collision fix ──────────────────────────────────────────────────
-  // 1. Color is stored in sessionStorage so it never changes mid-session.
-  // 2. We hash the username → deterministic base index, so two different
-  //    usernames almost never land on the same slot.
-  // 3. A small random offset handles same-username edge cases.
   let color = sessionStorage.getItem("userColor");
   if (!color) {
     let hash = 0;
@@ -48,6 +43,7 @@ function RoomWrapper() {
         language: "javascript",
         output: "Click ▶ Run to execute code",
         fileName: null,
+        lockedLines: new LiveMap(),
       }}
     >
       <Editor />
