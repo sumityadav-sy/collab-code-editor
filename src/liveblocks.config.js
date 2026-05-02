@@ -1,4 +1,4 @@
-import { createClient, LiveMap } from "@liveblocks/client";
+import { createClient, LiveMap, LiveList } from "@liveblocks/client";
 import { createRoomContext } from "@liveblocks/react";
 
 const client = createClient({
@@ -18,12 +18,13 @@ const {
     cursor: null,
   },
   Storage: {
-    code: "",
-    language: "javascript",
-    output: "",
-    fileName: null,
-    lockedLines: new LiveMap(), // lineNumber (string) → { name, color }
-  },
+  code: "",
+  language: "javascript",
+  output: "",
+  fileName: null,
+  lockedLines: new LiveMap(),
+  chatMessages: new LiveList([]),
+},
 });
 
 export {
@@ -33,4 +34,5 @@ export {
   useMutation,
   useStorage,
   LiveMap,
+  LiveList,
 };

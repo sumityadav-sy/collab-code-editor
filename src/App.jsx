@@ -1,6 +1,6 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, useParams, useNavigate } from "react-router-dom";
-import { RoomProvider, LiveMap } from "./liveblocks.config";
+import { RoomProvider, LiveMap, LiveList } from "./liveblocks.config";
 import Editor from "./components/Editor";
 import { COLORS } from "./utils/presence";
 import JoinRoom from "./pages/JoinRoom";
@@ -44,6 +44,7 @@ function RoomWrapper() {
         output: "Click ▶ Run to execute code",
         fileName: null,
         lockedLines: new LiveMap(),
+        chatMessages: new LiveList([]),
       }}
     >
       <Editor />
