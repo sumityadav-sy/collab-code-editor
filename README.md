@@ -117,7 +117,8 @@ Supports:
 ![Editor](screenshots/editor.png)
 
 ### team chat 
-![Chat](screenshots/team chat 2.png)
+![Chat](screenshots/teamchat1.png)
+![Chat](screenshots/teamchat2.png)
 
 ### AI Assistant Panel
 ![AI](screenshots/ai-panel.png)
