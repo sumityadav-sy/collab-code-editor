@@ -4,7 +4,7 @@
 
 ---
 
-A real-time multiplayer code editor built for teams. Multiple users can write, run, and debug code together in a shared room with live cursors, AI assistance, and instant room sharing — all in the browser.
+A real-time multiplayer code editor built for teams. Multiple users can write, run, and debug code together in a shared room with live cursors,team chat, AI assistance, and instant room sharing — all in the browser.
 ---
 
 ## Badges
@@ -21,10 +21,17 @@ A real-time multiplayer code editor built for teams. Multiple users can write, r
 ## Features
 
 ### Real-time Collaboration
-- Live multi-user editing
-- Live cursors with usernames
+- Live multi-user editing(Multiple users edit the same file simultaneously)
+- Live cursor tracking with usernames
 - Presence tracking (line, column)
 - Avatar stack for active users
+
+### Advanced Editing Features
+- Line-level locking system
+- Automatic lock release
+- Lock ownership validation
+- Locked line indicator banner
+- Shared language synchronization
 
 ### Room System
 - Unique room ID generation
@@ -42,22 +49,62 @@ A real-time multiplayer code editor built for teams. Multiple users can write, r
   - C++
 
 ### Code Execution
-- Judge0 API integration
-- Real-time output panel
-- Execution feedback (running, error, success)
+Code Execution Features
+- Run code directly in editor
+
+Integrated with RapidAPI Judge0 API
+
+- Multi-language execution support
+
+Runs:
+
+JavaScript
+Python
+Java
+C++
+- Shared output panel
+Execution output visible to all users
+- Output panel toggl
+- Error handling for execution
+Handles compile/runtime/API errors
 
 ### AI Assistant
 - Claude (via OpenRouter)
 - Explain code
 - Fix bugs
 - Improve code
+- Custom AI prompts
+
+### File Management 
+- Open local files
+
+Supports:
+
+.js
+.py
+.java
+.cpp
+- Auto-detect language from file extension
+- Save/download code to local file
+- Shared filename synchronization
+
+### Team Chat Features
+- Real-time team chat
+- Message timestamps
+- Sender-based message styling
+- Typing indicators
+- Unread message badge
+- Mobile chat drawer
+- Auto-scroll to latest messages
+- Chat history persistence
 
 ### UI / UX
-- Animated landing page (particles + code)
-- Glassmorphism design
-- Typewriter headline
-- Mobile AI drawer
+- Animated landing page for create and join room
+- Persistent user color identity
 - Toast notifications
+- Online user count
+- Responsive mobile layout
+- Team/collab sidebar tabs
 
 ---
 
@@ -68,6 +115,10 @@ A real-time multiplayer code editor built for teams. Multiple users can write, r
 
 ### Editor - Collaboration View
 ![Editor](screenshots/editor.png)
+
+### team chat 
+![Chat](screenshots/team chat 1.png)
+![Chat](screenshots/team chat 2.png)
 
 ### AI Assistant Panel
 ![AI](screenshots/ai-panel.png)
@@ -112,6 +163,9 @@ collab-editor
 
 ## Tech Stack
 
+### Architechture
+![Architechture](screenshots/Architechture.png)
+
 ### Frontend
 - React
 - React Router
@@ -128,6 +182,8 @@ collab-editor
 - OpenRouter (AI)
 
 ---
+### Application Flow 
+![Flow](screenshots/Architechture_collab_editor.png)
 
 ## Application Flow
 
