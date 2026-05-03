@@ -117,7 +117,6 @@ Supports:
 ![Editor](screenshots/editor.png)
 
 ### team chat 
-![Chat](screenshots/team chat 1.png)
 ![Chat](screenshots/team chat 2.png)
 
 ### AI Assistant Panel
@@ -182,10 +181,12 @@ collab-editor
 - OpenRouter (AI)
 
 ---
+
+## Application Flow
+
 ### Application Flow 
 ![Flow](screenshots/Architechture_collab_editor.png)
 
-## Application Flow
 
 ### Room Flow
 1. User enters username  
